@@ -13,12 +13,13 @@ A Node.js + TypeScript project that simulates a medical consultation booking sys
 3. [Project Structure](#project-structure)
 4. [Quick Start](#quick-start)
 5. [MCP stdio Server](#mcp-stdio-server)
-6. [Tool Contract](#tool-contract)
-7. [Domain Model](#domain-model)
-8. [Backend Domain Proposal](#backend-domain-proposal)
-9. [Frontend Operator Flow](#frontend-operator-flow)
-10. [MVP Delivery Cycles](#mvp-delivery-cycles)
-11. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
+6. [HTTP Server (ngrok-ready)](#http-server-ngrok-ready)
+7. [Tool Contract](#tool-contract)
+8. [Domain Model](#domain-model)
+9. [Backend Domain Proposal](#backend-domain-proposal)
+10. [Frontend Operator Flow](#frontend-operator-flow)
+11. [MVP Delivery Cycles](#mvp-delivery-cycles)
+12. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
 
 ---
 
@@ -82,6 +83,7 @@ mcp_agenda_tool/
 ├── src/
 │   ├── index.ts                  # Entry point -- bootstraps registry
 │   ├── mcpServer.ts              # MCP stdio server (Cycle 2)
+│   ├── mcpHttpServer.ts          # HTTP server transport (ngrok-ready)
 │   ├── demo.ts                   # Interactive demo of all tools
 │   ├── domain/
 │   │   ├── models.ts             # Core domain interfaces & enums
@@ -105,6 +107,7 @@ mcp_agenda_tool/
 │   │   └── index.ts
 │   └── __tests__/
 │       ├── InMemoryAgendaProvider.test.ts
+│       ├── mcpHttpServer.test.ts
 │       ├── mcpServer.test.ts
 │       └── tools.test.ts
 ├── package.json
@@ -309,6 +312,133 @@ Response:
     "createdAt": "..."
   }
 }
+```
+
+---
+
+## HTTP Server (ngrok-ready)
+
+`src/mcpHttpServer.ts` exposes the same four tools over a plain HTTP API so the
+service can be reached by any HTTP client or tunnelled through
+[ngrok](https://ngrok.com/).
+
+### Start the HTTP server
+
+**Development (ts-node):**
+
+```bash
+npm run http
+```
+
+**Production (compiled):**
+
+```bash
+npm run build
+npm run http:start
+```
+
+**Custom port** — set the `PORT` environment variable (default: `3000`):
+
+```bash
+PORT=8080 npm run http
+```
+
+Startup status is written to `stderr`:
+
+```
+mcp-agenda-tool HTTP server listening on port 3000
+  Expose with ngrok: ngrok http 3000
+```
+
+### Expose with ngrok
+
+```bash
+# In one terminal — start the HTTP server
+npm run http
+
+# In another terminal — start the ngrok tunnel
+ngrok http 3000
+```
+
+ngrok will print a public URL such as `https://abc123.ngrok-free.app`.
+Send requests to that URL as shown below.
+
+### Endpoints
+
+| Method | Path            | Description                                   |
+|--------|-----------------|-----------------------------------------------|
+| GET    | `/health`       | Liveness check                                |
+| GET    | `/tools`        | List available tools and their descriptions   |
+| POST   | `/tools/:name`  | Invoke a tool with a JSON body                |
+
+#### HTTP response status codes
+
+| Status | Meaning                                              |
+|--------|------------------------------------------------------|
+| 200    | Success                                              |
+| 400    | Malformed JSON body                                  |
+| 404    | Unknown route or unknown tool name                   |
+| 422    | Tool returned an error (e.g. invalid input)          |
+| 500    | Unexpected server error                              |
+
+### Example curl requests
+
+**Health check**
+
+```bash
+curl http://localhost:3000/health
+# {"ok":true,"timestamp":"2025-06-01T10:00:00.000Z"}
+```
+
+**List tools**
+
+```bash
+curl http://localhost:3000/tools
+```
+
+**List specialists (no filter)**
+
+```bash
+curl -X POST http://localhost:3000/tools/list_specialists \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Filter by specialty and modality**
+
+```bash
+curl -X POST http://localhost:3000/tools/list_specialists \
+  -H "Content-Type: application/json" \
+  -d '{"specialty":"CARDIOLOGY","modality":"TELEHEALTH"}'
+```
+
+**Get specialist availability**
+
+```bash
+curl -X POST http://localhost:3000/tools/get_specialist_availability \
+  -H "Content-Type: application/json" \
+  -d '{"specialistId":"spec-001"}'
+```
+
+**Search appointment slots**
+
+```bash
+curl -X POST http://localhost:3000/tools/search_appointment_slots \
+  -H "Content-Type: application/json" \
+  -d '{"specialty":"CARDIOLOGY","modality":"TELEHEALTH"}'
+```
+
+**Create a booking request**
+
+```bash
+curl -X POST http://localhost:3000/tools/create_booking_request \
+  -H "Content-Type: application/json" \
+  -d '{
+    "patientName": "María González",
+    "email": "maria.gonzalez@email.com",
+    "specialty": "CARDIOLOGY",
+    "reason": "Palpitations"
+  }'
 ```
 
 ---
