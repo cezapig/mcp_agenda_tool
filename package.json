@@ -12,6 +12,8 @@
     "mcp:start": "node dist/mcpServer.js",
     "http": "ts-node src/mcpHttpServer.ts",
     "http:start": "node dist/mcpHttpServer.js",
+    "mcp:http": "ts-node src/mcpHttpMcpServer.ts",
+    "mcp:http:start": "node dist/mcpHttpMcpServer.js",
     "lint": "eslint src --ext .ts",
     "test": "jest"
   },
