@@ -14,11 +14,11 @@ A Node.js + TypeScript project that simulates a medical consultation booking sys
 4. [Quick Start](#quick-start)
 5. [MCP stdio Server](#mcp-stdio-server)
 6. [Tool Contract](#tool-contract)
-6. [Domain Model](#domain-model)
-7. [Backend Domain Proposal](#backend-domain-proposal)
-8. [Frontend Operator Flow](#frontend-operator-flow)
-9. [MVP Delivery Cycles](#mvp-delivery-cycles)
-10. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
+7. [Domain Model](#domain-model)
+8. [Backend Domain Proposal](#backend-domain-proposal)
+9. [Frontend Operator Flow](#frontend-operator-flow)
+10. [MVP Delivery Cycles](#mvp-delivery-cycles)
+11. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
 
 ---
 
