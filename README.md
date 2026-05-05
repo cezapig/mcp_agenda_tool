@@ -436,8 +436,6 @@ npx @modelcontextprotocol/inspector
 
 ## Custom REST HTTP Server (ngrok-ready)
 
-## Custom REST HTTP Server (ngrok-ready)
-
 `src/mcpHttpServer.ts` exposes the same four tools over a **plain REST JSON API**
 so the service can be reached by any HTTP client or tunnelled through
 [ngrok](https://ngrok.com/).  This server is **not** an MCP transport — it
