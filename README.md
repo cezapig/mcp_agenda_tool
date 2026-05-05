@@ -12,14 +12,16 @@ A Node.js + TypeScript project that simulates a medical consultation booking sys
 2. [Architecture Overview](#architecture-overview)
 3. [Project Structure](#project-structure)
 4. [Quick Start](#quick-start)
-5. [MCP stdio Server](#mcp-stdio-server)
-6. [HTTP Server (ngrok-ready)](#http-server-ngrok-ready)
-7. [Tool Contract](#tool-contract)
-8. [Domain Model](#domain-model)
-9. [Backend Domain Proposal](#backend-domain-proposal)
-10. [Frontend Operator Flow](#frontend-operator-flow)
-11. [MVP Delivery Cycles](#mvp-delivery-cycles)
-12. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
+5. [Transport Modes — Overview](#transport-modes--overview)
+6. [MCP stdio Server](#mcp-stdio-server)
+7. [Remote MCP over HTTP (for n8n and remote clients)](#remote-mcp-over-http-for-n8n-and-remote-clients)
+8. [Custom REST HTTP Server (ngrok-ready)](#custom-rest-http-server-ngrok-ready)
+9. [Tool Contract](#tool-contract)
+10. [Domain Model](#domain-model)
+11. [Backend Domain Proposal](#backend-domain-proposal)
+12. [Frontend Operator Flow](#frontend-operator-flow)
+13. [MVP Delivery Cycles](#mvp-delivery-cycles)
+14. [How This Fits the Broader Workflow](#how-this-fits-the-broader-workflow)
 
 ---
 
@@ -82,8 +84,9 @@ The backend remains the **source of truth** for business data. This repo acts as
 mcp_agenda_tool/
 ├── src/
 │   ├── index.ts                  # Entry point -- bootstraps registry
-│   ├── mcpServer.ts              # MCP stdio server (Cycle 2)
-│   ├── mcpHttpServer.ts          # HTTP server transport (ngrok-ready)
+│   ├── mcpServer.ts              # MCP stdio server + createServer() factory
+│   ├── mcpHttpMcpServer.ts       # Remote MCP over HTTP (StreamableHTTP transport)
+│   ├── mcpHttpServer.ts          # Custom REST HTTP server (ngrok-ready)
 │   ├── demo.ts                   # Interactive demo of all tools
 │   ├── domain/
 │   │   ├── models.ts             # Core domain interfaces & enums
@@ -107,6 +110,7 @@ mcp_agenda_tool/
 │   │   └── index.ts
 │   └── __tests__/
 │       ├── InMemoryAgendaProvider.test.ts
+│       ├── mcpHttpMcpServer.test.ts
 │       ├── mcpHttpServer.test.ts
 │       ├── mcpServer.test.ts
 │       └── tools.test.ts
@@ -165,6 +169,20 @@ npm test
 ```bash
 npm run lint
 ```
+
+---
+
+## Transport Modes — Overview
+
+This repo provides **three independent transport modes**. Choose the one that matches your MCP client:
+
+| Mode | File | Script | Use when |
+|------|------|--------|----------|
+| **MCP stdio** | `src/mcpServer.ts` | `npm run mcp` | Local MCP client (Claude Desktop, `mcp inspect`, stdio pipe) |
+| **Remote MCP over HTTP** | `src/mcpHttpMcpServer.ts` | `npm run mcp:http` | Remote MCP client over the network (n8n, any StreamableHTTP/SSE client) |
+| **Custom REST HTTP** | `src/mcpHttpServer.ts` | `npm run http` | Non-MCP HTTP integrations, curl, ngrok REST proxy |
+
+> **n8n users**: use the **Remote MCP over HTTP** transport. Point your n8n MCP node at `http://<host>:<MCP_PORT>/mcp` (or the matching ngrok URL). Do **not** use the Custom REST HTTP server with an MCP client — it speaks a plain JSON REST protocol that MCP clients cannot understand.
 
 ---
 
@@ -316,13 +334,116 @@ Response:
 
 ---
 
-## HTTP Server (ngrok-ready)
+## Remote MCP over HTTP (for n8n and remote clients)
 
-`src/mcpHttpServer.ts` exposes the same four tools over a plain HTTP API so the
-service can be reached by any HTTP client or tunnelled through
-[ngrok](https://ngrok.com/).
+`src/mcpHttpMcpServer.ts` implements a real MCP endpoint over HTTP using the
+SDK's `StreamableHTTPServerTransport` (stateless mode).  Remote MCP clients
+such as [n8n](https://n8n.io/) send standard JSON-RPC 2.0 / MCP messages to
+this server and receive proper MCP protocol responses.
 
-### Start the HTTP server
+### Why this transport exists
+
+Remote MCP clients (n8n, any client using the Streamable HTTP transport) expect
+the server to speak the MCP / JSON-RPC 2.0 protocol.  The custom REST server
+(`mcpHttpServer.ts`) returns plain JSON payloads like `{ "tools": [...] }`,
+which MCP clients reject with validation errors such as:
+
+```
+{ "code": "invalid_union", "path": ["jsonrpc"], "message": "expected \"2.0\"" }
+```
+
+This MCP HTTP server speaks the correct protocol and resolves that error.
+
+### Start the MCP HTTP server
+
+**Development (ts-node):**
+
+```bash
+npm run mcp:http
+```
+
+**Production (compiled):**
+
+```bash
+npm run build
+npm run mcp:http:start
+```
+
+**Custom port** — set the `MCP_PORT` environment variable (default: `3002`):
+
+```bash
+MCP_PORT=4000 npm run mcp:http
+```
+
+Startup status is written to `stderr`:
+
+```
+mcp-agenda-tool MCP-over-HTTP server listening on port 3002
+  MCP endpoint: http://localhost:3002/mcp
+  Expose with ngrok: ngrok http 3002
+  Point n8n at: https://<ngrok-url>/mcp
+```
+
+### Endpoint
+
+| Method | Path      | Description                                       |
+|--------|-----------|---------------------------------------------------|
+| POST   | `/mcp`    | MCP JSON-RPC 2.0 messages (initialize, tools/list, tools/call …) |
+| GET    | `/mcp`    | SSE upgrade for server-initiated notifications    |
+| GET    | `/health` | Liveness probe                                    |
+
+Clients **must** send `Accept: application/json, text/event-stream` (the SDK enforces this for the Streamable HTTP transport).  Responses are delivered as Server-Sent Events (SSE).
+
+### Connect n8n as a remote MCP client
+
+1. Start the MCP HTTP server:
+
+   ```bash
+   npm run mcp:http
+   ```
+
+2. Expose it publicly with ngrok (or any tunnel/reverse proxy):
+
+   ```bash
+   ngrok http 3002
+   # ngrok prints: https://abc123.ngrok-free.app
+   ```
+
+3. In n8n, add a new **MCP Tool** node and set the endpoint URL to:
+
+   ```
+   https://abc123.ngrok-free.app/mcp
+   ```
+
+   n8n will send an `initialize` request followed by `tools/list` and
+   `tools/call` requests over the same endpoint. The server responds with
+   proper MCP / JSON-RPC 2.0 messages.
+
+### Verify with the MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector --cli http://localhost:3002/mcp --transport http
+```
+
+Or open the browser-based inspector:
+
+```bash
+npx @modelcontextprotocol/inspector
+# Then choose HTTP transport and enter http://localhost:3002/mcp
+```
+
+---
+
+## Custom REST HTTP Server (ngrok-ready)
+
+`src/mcpHttpServer.ts` exposes the same four tools over a **plain REST JSON API**
+so the service can be reached by any HTTP client or tunnelled through
+[ngrok](https://ngrok.com/).  This server is **not** an MCP transport — it
+does not speak JSON-RPC 2.0.  Use it only for curl / Postman / non-MCP HTTP
+integrations.  For MCP clients (n8n, Claude, etc.) use the
+[Remote MCP over HTTP](#remote-mcp-over-http-for-n8n-and-remote-clients) server above.
+
+### Start the REST HTTP server
 
 **Development (ts-node):**
 
