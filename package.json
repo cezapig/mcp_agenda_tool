@@ -8,6 +8,8 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "demo": "ts-node src/demo.ts",
+    "mcp": "ts-node src/mcpServer.ts",
+    "mcp:start": "node dist/mcpServer.js",
     "lint": "eslint src --ext .ts",
     "test": "jest"
   },
@@ -20,6 +22,7 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "uuid": "^9.0.0"
   },
   "devDependencies": {

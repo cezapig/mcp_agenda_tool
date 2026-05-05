@@ -12,7 +12,8 @@ A Node.js + TypeScript project that simulates a medical consultation booking sys
 2. [Architecture Overview](#architecture-overview)
 3. [Project Structure](#project-structure)
 4. [Quick Start](#quick-start)
-5. [Tool Contract](#tool-contract)
+5. [MCP stdio Server](#mcp-stdio-server)
+6. [Tool Contract](#tool-contract)
 6. [Domain Model](#domain-model)
 7. [Backend Domain Proposal](#backend-domain-proposal)
 8. [Frontend Operator Flow](#frontend-operator-flow)
@@ -80,6 +81,7 @@ The backend remains the **source of truth** for business data. This repo acts as
 mcp_agenda_tool/
 ├── src/
 │   ├── index.ts                  # Entry point -- bootstraps registry
+│   ├── mcpServer.ts              # MCP stdio server (Cycle 2)
 │   ├── demo.ts                   # Interactive demo of all tools
 │   ├── domain/
 │   │   ├── models.ts             # Core domain interfaces & enums
@@ -103,6 +105,7 @@ mcp_agenda_tool/
 │   │   └── index.ts
 │   └── __tests__/
 │       ├── InMemoryAgendaProvider.test.ts
+│       ├── mcpServer.test.ts
 │       └── tools.test.ts
 ├── package.json
 ├── tsconfig.json
@@ -162,7 +165,153 @@ npm run lint
 
 ---
 
-## Tool Contract
+## MCP stdio Server
+
+`src/mcpServer.ts` wraps the existing `ToolRegistry` in a standard [MCP](https://modelcontextprotocol.io/) stdio transport. Any MCP-compatible AI agent or client can connect to this server, list the four tools, and invoke them against the seeded in-memory data.
+
+### Start the server
+
+**Development (ts-node):**
+
+```bash
+npm run mcp
+```
+
+**Production (compiled):**
+
+```bash
+npm run build
+npm run mcp:start
+```
+
+The server reads JSON-RPC messages from `stdin` and writes responses to `stdout` following the MCP stdio transport protocol. Startup status is written to `stderr`:
+
+```
+mcp-agenda-tool MCP server started on stdio
+```
+
+### Connecting an MCP client
+
+The server exposes the following tools:
+
+| Tool name                      | Description                                              |
+|-------------------------------|----------------------------------------------------------|
+| `list_specialists`             | List specialists, optionally filtered                    |
+| `get_specialist_availability`  | Get available slots for a specialist (next 14 weekdays)  |
+| `search_appointment_slots`     | Search slots across all specialists with flexible filters|
+| `create_booking_request`       | Create a booking request (PENDING_CONFIRMATION)          |
+
+#### Claude Desktop / Claude.app
+
+Add the following to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+
+```json
+{
+  "mcpServers": {
+    "mcp-agenda-tool": {
+      "command": "node",
+      "args": ["/absolute/path/to/mcp_agenda_tool/dist/mcpServer.js"]
+    }
+  }
+}
+```
+
+Or with ts-node for development:
+
+```json
+{
+  "mcpServers": {
+    "mcp-agenda-tool": {
+      "command": "npx",
+      "args": ["ts-node", "/absolute/path/to/mcp_agenda_tool/src/mcpServer.ts"]
+    }
+  }
+}
+```
+
+#### Manual end-to-end test with `@modelcontextprotocol/inspector`
+
+```bash
+npx @modelcontextprotocol/inspector node dist/mcpServer.js
+```
+
+This opens a browser-based inspector where you can list tools and call them interactively.
+
+### Example end-to-end booking flow
+
+The following sequence shows a typical AI agent booking flow:
+
+**Step 1 — Find a cardiologist available for telehealth**
+
+```json
+{
+  "tool": "list_specialists",
+  "arguments": { "specialty": "CARDIOLOGY", "modality": "TELEHEALTH" }
+}
+```
+
+Response: returns specialist(s) with id, name, locations, etc.
+
+**Step 2 — Check availability for the specialist**
+
+```json
+{
+  "tool": "get_specialist_availability",
+  "arguments": { "specialistId": "spec-001" }
+}
+```
+
+Response: returns available slots with ids, dates, start/end times.
+
+**Step 3 — Search for a slot in a specific date range**
+
+```json
+{
+  "tool": "search_appointment_slots",
+  "arguments": {
+    "specialty": "CARDIOLOGY",
+    "modality": "TELEHEALTH",
+    "fromDate": "2025-06-02",
+    "toDate": "2025-06-06"
+  }
+}
+```
+
+**Step 4 — Create a booking request**
+
+```json
+{
+  "tool": "create_booking_request",
+  "arguments": {
+    "patientName": "María González",
+    "email": "maria.gonzalez@email.com",
+    "phone": "+34 612 345 678",
+    "specialty": "CARDIOLOGY",
+    "reason": "Palpitations and shortness of breath",
+    "slotId": "<slot-id-from-step-2>"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": "...",
+    "patientName": "María González",
+    "contact": { "email": "maria.gonzalez@email.com", "phone": "+34 612 345 678" },
+    "specialty": "CARDIOLOGY",
+    "reason": "Palpitations and shortness of breath",
+    "slotId": "...",
+    "status": "PENDING_CONFIRMATION",
+    "createdAt": "..."
+  }
+}
+```
+
+---
 
 All tools follow this result shape:
 
@@ -467,7 +616,7 @@ The frontend is **downstream** of booking request creation. It supports human sc
 - [x] Tests (44 passing) + demo
 
 ### Cycle 2 -- Agent Integration
-- [ ] Wire ToolRegistry to stdio or HTTP MCP transport
+- [x] Wire ToolRegistry to stdio MCP transport (`src/mcpServer.ts`, `npm run mcp`)
 - [ ] Connect AI booking agent (LLM + orchestrator) to tool surface
 - [ ] Add NEEDS_HUMAN escalation signal to tool responses
 - [ ] Enrich booking request with agent conversation context
